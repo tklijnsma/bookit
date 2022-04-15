@@ -1,0 +1,2 @@
+import bookit
+print(bookit.__version__)
