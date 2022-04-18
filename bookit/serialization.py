@@ -1,7 +1,7 @@
 import json
 import numpy as np
-import dev as tf
 import dataclasses
+import bookit as bk
 
 DATEFMT = '%Y%m%d'
 
@@ -18,7 +18,7 @@ def deserialize(serialized_tree, parent=None):
     node = None
     for t in serialized_tree:
         if isinstance(t, dict):
-            node = tf.Node(*list(t.items())[0], parent=parent)
+            node = bk.Node(*list(t.items())[0], parent=parent)
         elif isinstance(t, list):
             deserialize(t, parent=node)
     return node
@@ -26,7 +26,7 @@ def deserialize(serialized_tree, parent=None):
 
 class Encoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, tf.Transaction):
+        if isinstance(obj, bk.Transaction):
             return dict(
                 type = 'Transaction',
                 date = obj.date.strftime(DATEFMT),
@@ -38,19 +38,19 @@ class Encoder(json.JSONEncoder):
 
         elif dataclasses.is_dataclass(obj):
             d = dataclasses.asdict(obj)
-            if isinstance(obj, tf.Currency):
+            if isinstance(obj, bk.Currency):
                 d['type'] = 'Currency'
-            elif isinstance(obj, tf.Account):
+            elif isinstance(obj, bk.Account):
                 d['type'] = 'Account'
             return d
 
-        elif isinstance(obj, tf.TransactionArray):
+        elif isinstance(obj, bk.TransactionArray):
             return dict(type='TransactionArray', val=[ self.default(t) for t in obj ])
 
-        elif isinstance(obj, tf.Node):
+        elif isinstance(obj, bk.Node):
             return dict(type='Node', val=serialize(obj))
 
-        elif isinstance(obj, tf.Categorization):
+        elif isinstance(obj, bk.Categorization):
             return dict(
                 type = 'Categorization',
                 ta = self.default(obj.ta),
@@ -63,7 +63,8 @@ class Encoder(json.JSONEncoder):
 
 class Decoder(json.JSONDecoder):
     def __init__(self, *args, **kwargs):
-        self.currencies = { c.name : c for c in kwargs.pop('currencies', []) }
+        self.currencies = bk.currencies.copy()
+        self.currencies.update({ c.name : c for c in kwargs.pop('currencies', []) })
         self.accounts = kwargs.pop('accounts', {})
         json.JSONDecoder.__init__(self, object_hook=self.object_hook, *args, **kwargs)
 
@@ -77,36 +78,36 @@ class Decoder(json.JSONDecoder):
             if currency_name in self.currencies:
                 self.currencies[currency_name].rate = d['rate']
             else:
-                self.currencies[currency_name] = tf.Currency(currency_name, d['rate'])
+                self.currencies[currency_name] = bk.Currency(currency_name, d['rate'])
         elif type == 'Account':
             if d['name'] not in self.accounts:
-                self.currencies[d['name']] = tf.Account(d['name'])
+                self.currencies[d['name']] = bk.Account(d['name'])
         elif type == 'Transaction':
             account = d['account']
             if account:
                 if account not in self.accounts:
-                    account = self.accounts.setdefault(account, tf.Account(account))
+                    account = self.accounts.setdefault(account, bk.Account(account))
                 else:
                     account = self.accounts[account]
             currency = d['currency']
             if currency:
                 if currency not in self.currencies:
-                    currency = self.currencies.setdefault(currency, tf.Currency(currency, 0.))
+                    currency = self.currencies.setdefault(currency, bk.Currency(currency, 0.))
                 else:
                     currency = self.currencies[currency]
-            return tf.Transaction(
-                tf.Date.strptime(d['date'], DATEFMT),
+            return bk.Transaction(
+                bk.Date.strptime(d['date'], DATEFMT),
                 d['amount'],
                 d['description'],
                 account,
                 currency,
                 )
         elif type == 'TransactionArray':
-            return tf.TransactionArray(d['val'])
+            return bk.TransactionArray(d['val'])
         elif type == 'Node':
             return deserialize(d['val'])
         elif type == 'Categorization':
-            return tf.Categorization(d['ta'], np.array(d['category']), d['root'])
+            return bk.Categorization(d['ta'], np.array(d['category']), d['root'])
         return d
 
 def dumps(*args, **kwargs):

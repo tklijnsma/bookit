@@ -1,5 +1,4 @@
 from __future__ import annotations
-from unicodedata import category
 import numpy as np
 from dataclasses import dataclass
 from datetime import datetime as Date
@@ -44,7 +43,16 @@ class Currency:
     name: str
     rate: float
 
-USD = Currency('USD', 1.)
+
+class CurrenciesContainer(dict):
+    """
+    Like a dict, but with access via attributes
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
+
+currencies = CurrenciesContainer(USD=Currency('USD', 1.))
 
 
 @dataclass
@@ -57,7 +65,7 @@ class Transaction:
     amount: float
     description: str
     account: Account = None
-    currency: Currency = USD
+    currency: Currency = currencies.USD
 
     @property
     def camount(self):
@@ -140,6 +148,12 @@ class TransactionArray(np.ndarray):
         mat.flat = [ t.currency.name for t in self.flat ]
         return mat
 
+    @property
+    def account_name(self):
+        mat = np.empty(self.shape, dtype='<U10')
+        mat.flat = [ t.account.name if t.account else '' for t in self.flat ]
+        return mat
+
     def sum(self, *args, **kwargs):
         return self.camount.sum(*args, **kwargs)
 
@@ -204,7 +218,10 @@ def merge(tas):
     """
     Merge transaction arrays; filters out duplicates
     """
-    return np.unique(np.concatenate(tas)).view(TransactionArray)
+    ta, counts = np.unique(np.concatenate(tas), return_counts=True)
+    pprint.pprint(counts)
+    # logger.warning('Filtered {}')
+    return ta.view(TransactionArray)
 
 
 # ________________________________________________________________
@@ -313,6 +330,11 @@ class Categorization:
         integers = [node.integer for node in iter_dfs(root)]
         return np.isin(self.category, integers)
 
+    def add_transactions(self, ta):
+        n_old = len(self.ta)
+        self.ta = merge((self.ta, ta))
+        n_added = len(self.ta) - n_old
+        self.category = np.concatenate((self.category, np.zeros(n_added, dtype=int)))
 
 
 class Session:
@@ -409,8 +431,16 @@ class Session:
         return base_dir
 
 
+    def _reset_convenience_variables(self):
+        if hasattr(self, '_console_scope'):
+            ta = self.categorization.ta[self.categorization.category == self.curr_dir.integer]
+            self._console_scope['ta'] = ta
+            self._console_scope['date'] = ta.date
+            self._console_scope['amount'] = ta.amount
+            self._console_scope['description'] = ta.description
+
+
 def load_session(filename: str):
-    import serialization
     with open(filename, 'rb') as f:
         categorization = serialization.load(f)
         print(f'Loaded categorization from {filename}')
@@ -429,7 +459,7 @@ class Selection:
         self.category = category
 
     def __repr__(self):
-        r = repr(self.ta)
+        r = repr(self.ta).replace('TransactionArray', 'Selection')
         if self.category is not None:
             r += f' (category: {self.category.name})'
         return r
@@ -538,9 +568,12 @@ def make_eval_scope(session: Session):
             path[-1], extension = path[-1].split('.', 1)
             name = '/'.join(path)
             # ($..).amount.sum()
-        if name == 'A':
+        if name == 'a':
             select = np.ones_like(session.categorization.category, dtype=bool)
             selection = Selection(session.categorization, select)
+        elif name == 'h':
+            select = session.categorization.category == session.curr_dir.integer
+            selection = Selection(session.categorization, select, session.curr_dir)
         else:
             node = session.get_dir(name)
             select = session.categorization.category==node.integer
@@ -554,6 +587,7 @@ def make_eval_scope(session: Session):
     def changedir(name='/'):
         session.cd(name)
         set_ps1(session.abspath(session.curr_dir))
+        session._reset_convenience_variables()
         return
 
     def printworkdir():
@@ -576,7 +610,6 @@ def make_eval_scope(session: Session):
             print('  '*depth + path + f'  ({count(node)} transactions)')
 
     def savecategorization(filename=None):
-        import serialization
         if filename is None:
             if session._filename is None:
                 print('Cannot save: Pass a filename')
@@ -594,11 +627,25 @@ def make_eval_scope(session: Session):
             print(f'Saved to {filename}')
             session._filename = filename
 
-    amount = session.categorization.ta.amount
-    description = session.categorization.ta.description
+    # Convenience variables
+    gta = session.categorization.ta
+    gdate = gta.date
+    gamount = gta.amount
+    gdescription = gta.description
+    ta = session.categorization.ta[session.categorization.category == session.curr_dir.integer]
+    date = ta.date
+    amount = ta.amount
+    description = ta.description
+    bk = sys.modules[__name__]
     return locals()
 
 
 def evaluate(session, expression):
     locals().update(make_eval_scope(session))
     return eval(format_expression(expression))
+
+
+# __________________________________________________
+from . import serialization
+from . import console
+from . import cli

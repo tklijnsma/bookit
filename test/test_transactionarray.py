@@ -1,11 +1,11 @@
-import sys, os, os.path as osp
-sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
-from dev import Transaction, TransactionArray
-import dev as tf
+import os, os.path as osp
+
+import bookit as bk
+from bookit import Transaction, TransactionArray
 import numpy as np
 from datetime import datetime as Date
 
-tf.debug()
+bk.debug()
 
 def get_test_array():
     return TransactionArray([
@@ -97,7 +97,7 @@ def test_stitching():
         Transaction(Date(2021,1,6), 70.12, 'oil change'),
         ])
     expected = np.concatenate((ta1, ta2[2:]))
-    np.testing.assert_array_equal(tf.stitch(ta1, ta2), expected)
+    np.testing.assert_array_equal(bk.stitch(ta1, ta2), expected)
 
 
 # def test_np_object_array_implementation():

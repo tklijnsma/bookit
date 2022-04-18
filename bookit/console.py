@@ -1,8 +1,8 @@
 import readline # Enables up-arrow in the console!
 import rlcompleter
 import code
-import dev as tf
 import numpy as np
+import bookit as bk
 
 class Completer(rlcompleter.Completer):
     def __init__(self, scope, session):
@@ -31,37 +31,21 @@ class Completer(rlcompleter.Completer):
 
 class Console(code.InteractiveConsole):
 
-    def __init__(self, session):
+    def __init__(self, session: bk.Session):
         self.session = session
-        tf.set_ps1(session.abspath(session.curr_dir))
-        self.scope = tf.make_eval_scope(session)
+        bk.set_ps1(session.abspath(session.curr_dir))
+        self.scope = bk.make_eval_scope(session)
+        self.session._console_scope = self.scope
         readline.set_completer(Completer(self.scope, session).complete) 
         readline.parse_and_bind("tab: complete")   
         super().__init__(locals=self.scope)
 
     def push(self, line):
         before = repr(line)
-        line = tf.format_expression(line)
+        line = bk.format_expression(line)
         after = repr(line)
-        print(f'Formatted line {before} --> {after}')
-        return super().push(line)
-
-# Console(locals=dict(answer=42)).interact('Welcome!', 'Bye!')
-
-def test_console():
-    import sys
-    if len(sys.argv) > 1:
-        session = tf.load_session(sys.argv[1])
-    else:
-        ta = tf.TransactionArray([
-            tf.Transaction(tf.Date(2021,1,1), 5., 'starbucks'),
-            tf.Transaction(tf.Date(2021,1,1), 300., 'costco'),
-            tf.Transaction(tf.Date(2021,1,2), 45.23, 'some food'),
-            ])
-        session = tf.Session(tf.Categorization(ta))
-        somecat = session.mkdir('somecat')
-        session.categorization.category = np.array([0, 1, 1])
-    Console(session).interact('Welcome!', 'Bye!')
-
-if __name__ == '__main__':
-    test_console()
+        if after[1:-1].strip() != "":
+            print(f'Formatted line {before} --> {after}')
+            r = super().push(line)
+            self.session._reset_convenience_variables()
+            return r

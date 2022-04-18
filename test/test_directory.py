@@ -1,11 +1,12 @@
 import pytest
 import sys, os, os.path as osp
 sys.path.append(osp.dirname(osp.dirname(osp.abspath(__file__))))
-from dev import Categorization, Transaction, TransactionArray, Session, Date, Node
-import dev as tf
+from bookit import Categorization, Transaction, TransactionArray, Session, Date, Node
+import bookit as bk
+
 import numpy as np
 
-tf.debug()
+bk.debug()
 
 
 def get_test_array():
@@ -27,6 +28,13 @@ def test_categorization():
     np.testing.assert_array_equal(categorization.select('somecat'), np.array([False, True, False]))
     np.testing.assert_array_equal(categorization.select_multiple(['root', 'somecat']), np.array([True, True, False]))
     np.testing.assert_array_equal(categorization.select_recursively('somecat'), np.array([False, True, True]))
+
+    new_ta = TransactionArray([Transaction(Date(2021,1,5), 10., 'mcdonalds'),])
+    categorization.add_transactions(new_ta)
+    assert categorization.ta.shape == (4,)
+    assert categorization.ta[-1] == new_ta[0]
+    assert categorization.category.shape == (4,)
+    assert categorization.category[-1] == 0
 
 
 def test_basic_session():
@@ -50,31 +58,31 @@ def test_basic_session():
     session.cd('./../category/.././')
     assert session.pwd == '/'
 
-    with pytest.raises(tf.NoSuchPath):
+    with pytest.raises(bk.NoSuchPath):
         session.cd('does_not_exist')
 
     assert session.abspath(root) == '/'
 
 
 def test_expression_formatting():
-    assert list(tf.yield_code_blocks('')) == []
-    assert list(tf.yield_code_blocks('a')) == [('a', False)]
-    assert list(tf.yield_code_blocks('"a"')) == [('"a"', True)]
-    assert list(tf.yield_code_blocks('a"a"')) == [('a', False), ('"a"', True)]
-    assert list(tf.yield_code_blocks("a'a'bb")) == [('a', False), ("'a'", True), ('bb', False)]
-    assert list(tf.yield_code_blocks("a''bb")) == [('a', False), ("''", True), ('bb', False)]
-    assert list(tf.yield_code_blocks("a''''")) == [('a', False), ("''", True), ("''", True)]
+    assert list(bk.yield_code_blocks('')) == []
+    assert list(bk.yield_code_blocks('a')) == [('a', False)]
+    assert list(bk.yield_code_blocks('"a"')) == [('"a"', True)]
+    assert list(bk.yield_code_blocks('a"a"')) == [('a', False), ('"a"', True)]
+    assert list(bk.yield_code_blocks("a'a'bb")) == [('a', False), ("'a'", True), ('bb', False)]
+    assert list(bk.yield_code_blocks("a''bb")) == [('a', False), ("''", True), ('bb', False)]
+    assert list(bk.yield_code_blocks("a''''")) == [('a', False), ("''", True), ("''", True)]
 
-    assert tf.format_expression('$somecat') == 'cat("somecat")'
-    assert tf.format_expression('$somecat.bla') == 'cat("somecat.bla")'
-    assert tf.format_expression('$somecat.bla().foo') == 'cat("somecat.bla")().foo'
+    assert bk.format_expression('$somecat') == 'selectcategory("somecat")'
+    assert bk.format_expression('$somecat.bla') == 'selectcategory("somecat.bla")'
+    assert bk.format_expression('$somecat.bla().foo') == 'selectcategory("somecat.bla")().foo'
 
-    assert tf.format_expression('cd somecat') == 'changedir("somecat")'
-    assert tf.format_expression('cd ./..//somecat/bla bla') == 'changedir("./..//somecat/bla") bla'
-    assert tf.format_expression('cd somecat; pwd') == 'changedir("somecat"); printworkdir()'
+    assert bk.format_expression('cd somecat') == 'changedir("somecat")'
+    assert bk.format_expression('cd ./..//somecat/bla bla') == 'changedir("./..//somecat/bla") bla'
+    assert bk.format_expression('cd somecat; pwd') == 'changedir("somecat"); printworkdir()'
 
-    # assert tf.format_expression('"foo"$somecat"bla"') == '"foo"cat("somecat")"bla"'
-    # assert tf.format_expression('"foo"$somecat"bla\\""') == '"foo"cat("somecat")"bla\\""'
+    # assert bk.format_expression('"foo"$somecat"bla"') == '"foo"selectcategory("somecat")"bla"'
+    # assert bk.format_expression('"foo"$somecat"bla\\""') == '"foo"selectcategory("somecat")"bla\\""'
 
 
 def test_expression_evaluating():
@@ -83,28 +91,28 @@ def test_expression_evaluating():
     somecat = session.mkdir('somecat')
     session.categorization.category = np.array([0, 1, 1])
 
-    assert tf.evaluate(session, '($.).category') is session.categorization.root
-    assert tf.evaluate(session, '$somecat.category') is somecat
-    np.testing.assert_array_equal(tf.evaluate(session, '$somecat.ta'), ta[1:])
-    np.testing.assert_array_equal(tf.evaluate(session, '$/somecat.ta'), ta[1:])
-    np.testing.assert_array_equal(tf.evaluate(session, '$/somecat/../somecat.ta'), ta[1:])
-    np.testing.assert_array_equal(tf.evaluate(session, '($/somecat/..).ta'), ta[:1])
-    np.testing.assert_array_equal(tf.evaluate(session, '$somecat.amount'), ta[1:].amount)
-    np.testing.assert_array_equal(tf.evaluate(session, '$somecat.amount.sum()'), ta[1:].amount.sum())
+    assert bk.evaluate(session, '($.).category') is session.categorization.root
+    assert bk.evaluate(session, '$somecat.category') is somecat
+    np.testing.assert_array_equal(bk.evaluate(session, '$somecat.ta'), ta[1:])
+    np.testing.assert_array_equal(bk.evaluate(session, '$/somecat.ta'), ta[1:])
+    np.testing.assert_array_equal(bk.evaluate(session, '$/somecat/../somecat.ta'), ta[1:])
+    np.testing.assert_array_equal(bk.evaluate(session, '($/somecat/..).ta'), ta[:1])
+    np.testing.assert_array_equal(bk.evaluate(session, '$somecat.amount'), ta[1:].amount)
+    np.testing.assert_array_equal(bk.evaluate(session, '$somecat.amount.sum()'), ta[1:].amount.sum())
 
     with pytest.raises(ValueError):
-        tf.evaluate(session, 'cat("...amount")')
-    with pytest.raises(tf.NoSuchPath):
-        tf.evaluate(session, 'cat("/blabla")')
+        bk.evaluate(session, 'selectcategory("...amount")')
+    with pytest.raises(bk.NoSuchPath):
+        bk.evaluate(session, 'selectcategory("/blabla")')
 
-    np.testing.assert_array_equal(tf.evaluate(session, '$somecat[$somecat.amount>100].ta'), ta[1:2])
-    np.testing.assert_array_equal(tf.evaluate(session, '$somecat[1:2].ta'), ta[2:])
-    np.testing.assert_array_equal(tf.evaluate(session, '$somecat[0].ta'), ta[1])
-    np.testing.assert_array_equal(tf.evaluate(session, '($somecat & (amount>100)).ta'), ta[1:2])
+    np.testing.assert_array_equal(bk.evaluate(session, '$somecat[$somecat.amount>100].ta'), ta[1:2])
+    np.testing.assert_array_equal(bk.evaluate(session, '$somecat[1:2].ta'), ta[2:])
+    np.testing.assert_array_equal(bk.evaluate(session, '$somecat[0].ta'), ta[1])
+    np.testing.assert_array_equal(bk.evaluate(session, '($somecat & (gamount>100)).ta'), ta[1:2])
 
     newcat = session.mkdir('newcat')
-    tf.evaluate(session, '$somecat >> $newcat')
-    np.testing.assert_array_equal(tf.evaluate(session, '$newcat.ta'), ta[1:])
+    bk.evaluate(session, '$somecat >> $newcat')
+    np.testing.assert_array_equal(bk.evaluate(session, '$newcat.ta'), ta[1:])
 
 
 
@@ -140,16 +148,16 @@ def test_expression_evaluating():
 
 
 # def test_expr_split():
-#     assert tf.expr_split('') == ['']
-#     assert tf.expr_split('aa') == ['aa']
-#     assert tf.expr_split('ab|cd|ef') == ['ab', 'cd', 'ef']
-#     assert tf.expr_split('ab|c"d"|ef') == ['ab', 'c"d"', 'ef']
-#     assert tf.expr_split('ab|c"|d"|\'ef||\'') == ['ab', 'c"|d"', "'ef||'"]
-#     assert tf.expr_split('a>>a') == ['a', '>> a']
-#     assert tf.expr_split('a | b >> c') == ['a ', ' b ', '>>  c']
+#     assert bk.expr_split('') == ['']
+#     assert bk.expr_split('aa') == ['aa']
+#     assert bk.expr_split('ab|cd|ef') == ['ab', 'cd', 'ef']
+#     assert bk.expr_split('ab|c"d"|ef') == ['ab', 'c"d"', 'ef']
+#     assert bk.expr_split('ab|c"|d"|\'ef||\'') == ['ab', 'c"|d"', "'ef||'"]
+#     assert bk.expr_split('a>>a') == ['a', '>> a']
+#     assert bk.expr_split('a | b >> c') == ['a ', ' b ', '>>  c']
 
 # def test_expr_pythonize():
-#     assert tf.pythonize_expression('>> bla') == 'categorize("bla")'
+#     assert bk.pythonize_expression('>> bla') == 'categorize("bla")'
 
 
 # def test_categorizing():

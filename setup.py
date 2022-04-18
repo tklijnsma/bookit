@@ -20,5 +20,7 @@ setup(
     zip_safe      = False,
     scripts       = [
         'bin/bookit-version',
+        'bin/bookit-parse-transactions',
+        'bin/bookit-add-transactions'
         ]
     )
