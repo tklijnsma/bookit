@@ -19,6 +19,7 @@ setup(
     include_package_data = True,
     zip_safe      = False,
     scripts       = [
+        'bin/bookit-console',
         'bin/bookit-version',
         'bin/bookit-parse-transactions',
         'bin/bookit-add-transactions'

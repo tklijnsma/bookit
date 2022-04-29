@@ -19,15 +19,16 @@ def get_test_array():
 def test_categorization():
     ta = get_test_array()
     categorization = Categorization(ta)
+    root = categorization.root
     somecat = categorization.new_cat('somecat')
     somesubcat = categorization.new_cat('somesubcat', parent=somecat)
     assert categorization.root.children == [somecat]
     assert somecat.children == [somesubcat]
     
     categorization.category = np.array([0, 1, 2])
-    np.testing.assert_array_equal(categorization.select('somecat'), np.array([False, True, False]))
-    np.testing.assert_array_equal(categorization.select_multiple(['root', 'somecat']), np.array([True, True, False]))
-    np.testing.assert_array_equal(categorization.select_recursively('somecat'), np.array([False, True, True]))
+    np.testing.assert_array_equal(categorization.select(somecat).selection, np.array([False, True, False]))
+    np.testing.assert_array_equal(categorization.select_multiple([root, somecat]).selection, np.array([True, True, False]))
+    np.testing.assert_array_equal(categorization.select_recursively(somecat).selection, np.array([False, True, True]))
 
     new_ta = TransactionArray([Transaction(Date(2021,1,5), 10., 'mcdonalds'),])
     categorization.add_transactions(new_ta)
@@ -62,6 +63,21 @@ def test_basic_session():
         session.cd('does_not_exist')
 
     assert session.abspath(root) == '/'
+
+    subcat = session.mkdir('category/subcat')
+    session.mv('category', 'different')
+    assert subcat.parent.name == 'different'
+    assert not session.exists('category')
+
+    # Rename directory with children
+    parent = session.mkdir('parent')
+    child1 = session.mkdir('parent/child1')
+    child2 = session.mkdir('parent/child2')
+    session.mv('parent', 'rparent')
+    assert child1.parent.name == 'rparent'
+    assert child2.parent.name == 'rparent'
+
+
 
 
 def test_expression_formatting():

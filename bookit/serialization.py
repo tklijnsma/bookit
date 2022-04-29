@@ -32,7 +32,7 @@ class Encoder(json.JSONEncoder):
                 date = obj.date.strftime(DATEFMT),
                 amount = obj.amount,
                 description = obj.description,
-                account = getattr(obj.account, 'name', None),
+                account = obj.account,
                 currency = getattr(obj.currency, 'name', None),
                 )
 
@@ -40,8 +40,6 @@ class Encoder(json.JSONEncoder):
             d = dataclasses.asdict(obj)
             if isinstance(obj, bk.Currency):
                 d['type'] = 'Currency'
-            elif isinstance(obj, bk.Account):
-                d['type'] = 'Account'
             return d
 
         elif isinstance(obj, bk.TransactionArray):
@@ -65,7 +63,6 @@ class Decoder(json.JSONDecoder):
     def __init__(self, *args, **kwargs):
         self.currencies = bk.currencies.copy()
         self.currencies.update({ c.name : c for c in kwargs.pop('currencies', []) })
-        self.accounts = kwargs.pop('accounts', {})
         json.JSONDecoder.__init__(self, object_hook=self.object_hook, *args, **kwargs)
 
 
@@ -79,16 +76,7 @@ class Decoder(json.JSONDecoder):
                 self.currencies[currency_name].rate = d['rate']
             else:
                 self.currencies[currency_name] = bk.Currency(currency_name, d['rate'])
-        elif type == 'Account':
-            if d['name'] not in self.accounts:
-                self.currencies[d['name']] = bk.Account(d['name'])
         elif type == 'Transaction':
-            account = d['account']
-            if account:
-                if account not in self.accounts:
-                    account = self.accounts.setdefault(account, bk.Account(account))
-                else:
-                    account = self.accounts[account]
             currency = d['currency']
             if currency:
                 if currency not in self.currencies:
@@ -99,7 +87,7 @@ class Decoder(json.JSONDecoder):
                 bk.Date.strptime(d['date'], DATEFMT),
                 d['amount'],
                 d['description'],
-                account,
+                d['account'],
                 currency,
                 )
         elif type == 'TransactionArray':
@@ -125,3 +113,7 @@ def loads(*args, **kwargs):
 def load(*args, **kwargs):
     kwargs['cls'] = Decoder
     return json.load(*args, **kwargs)
+
+def load_from_path(path, *args, **kwargs):
+    with open(path, 'rb') as f:
+        return load(f, *args, **kwargs)

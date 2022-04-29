@@ -29,6 +29,13 @@ def setup_logger(name='tf'):
     return logger
 logger = setup_logger()
 
+
+def version():
+    version_file = osp.join(osp.dirname(osp.abspath(__file__)), 'include/VERSION')
+    with open(version_file) as f:
+        return f.read().strip()
+__version__ = version()
+
 def debug(flag=True):
     """Sets the logger level to debug (for True) or warning (for False)"""
     logger.setLevel(logging.DEBUG if flag else DEFAULT_LOGGING_LEVEL)
@@ -36,6 +43,38 @@ def debug(flag=True):
 
 def set_ps1(path=''):
     sys.ps1 = f"${path}: "
+
+
+DO_VERIFY = True
+def set_verification(flag: bool=True):
+    global DO_VERIFY
+    DO_VERIFY = flag
+    logger.info(f'Set verification to {DO_VERIFY}')
+
+def verify(msg):
+    if DO_VERIFY:
+        while True:
+            answer = input(msg).lower()
+            if answer == 'y':
+                return True
+            elif answer == 'n':
+                return False
+    return True
+
+DO_COLOR = True
+def set_coloring(flag: bool=True):
+    global DO_COLOR
+    DO_COLOR = flag
+    logger.info(f'Set coloring to {DO_COLOR}')
+
+colors = {
+    'gray' : '\033[90m',
+    'red' : '\033[31m',
+    'green' : '\033[32m',
+    }
+def colored(text, color):
+    if not DO_COLOR: return text
+    return colors[color] + text + '\033[0m'
 
 
 @dataclass
@@ -52,40 +91,52 @@ class CurrenciesContainer(dict):
         super().__init__(*args, **kwargs)
         self.__dict__ = self
 
-currencies = CurrenciesContainer(USD=Currency('USD', 1.))
+currencies = CurrenciesContainer(USD=Currency('USD', 1.), EUR=Currency('EUR', 1.0819))
 
 
-@dataclass
-class Account:
-    name: str
+def amount_str(amount: float, width=8):
+    if amount == 0.:
+        return colored(f'{amount:{width}.2f}', 'gray')
+    else:
+        return colored(f'{amount:+{width}.2f}', 'red' if amount < 0. else 'green')
+
 
 @dataclass
 class Transaction:
     date: Date
     amount: float
     description: str
-    account: Account = None
+    account: str = None
     currency: Currency = currencies.USD
 
     @property
     def camount(self):
         return self.amount * self.currency.rate
 
+    @property
+    def day(self):
+        return self.date.day
+
+    @property
+    def month(self):
+        return self.date.strftime('%b').lower()
+
+    @property
+    def imonth(self):
+        return self.date.month
+
+    @property
+    def year(self):
+        return self.date.year
+
     def __repr__(self) -> str:        
-        if self.amount == 0.:
-            color_code = '\033[90m'
-            sign = ''
-        elif self.amount < 0.:
-            color_code = '\033[31m'
-            sign = '-'
-        elif self.amount > 0.:
-            color_code = '\033[32m'
-            sign = '+'
-        return (
+        r = (
             f"{self.date.strftime('%Y-%m-%d')} {self.currency.name}"
-            f" {color_code}{self.amount:{sign}8.2f}\033[0m"
-            f" {self.description}"
+            f" {amount_str(self.amount)} {self.description}"
             )
+        if self.account:
+            r += ' ' + colored('(' + self.account + ')', 'gray')
+        return r
 
     def __lt__(self, other):
         if self.date == other.date:
@@ -143,15 +194,46 @@ class TransactionArray(np.ndarray):
         return mat
 
     @property
+    def month(self):
+        mat = np.empty(self.shape, dtype='<U10')
+        mat.flat = [ t.month for t in self.flat ]
+        return mat
+
+    @property
+    def day(self):
+        mat = np.empty(self.shape, dtype=int)
+        mat.flat = [ t.day for t in self.flat ]
+        return mat
+
+    @property
+    def imonth(self):
+        mat = np.empty(self.shape, dtype=int)
+        mat.flat = [ t.imonth for t in self.flat ]
+        return mat
+
+    @property
+    def year(self):
+        mat = np.empty(self.shape, dtype=int)
+        mat.flat = [ t.year for t in self.flat ]
+        return mat
+
+    @property
+    def monthyear(self):
+        mat = np.empty(self.shape, dtype='<U7')
+        mat.flat = [ t.month+str(t.year) for t in self.flat ]
+        return mat
+
+    @property
     def currency_name(self):
         mat = np.empty(self.shape, dtype='<U10')
         mat.flat = [ t.currency.name for t in self.flat ]
         return mat
 
     @property
-    def account_name(self):
-        mat = np.empty(self.shape, dtype='<U10')
-        mat.flat = [ t.account.name if t.account else '' for t in self.flat ]
+    def account(self):
+        mat = np.empty(self.shape, dtype='<U50')
+        # mat.flat = [ t.account if t.account else '' for t in self.flat ]
+        mat.flat = [ t.account for t in self.flat ]
         return mat
 
     def sum(self, *args, **kwargs):
@@ -183,12 +265,22 @@ class TransactionArray(np.ndarray):
     def sort_by_camount(self, axis=-1):
         return self.sort_by('camount', axis)
 
-    def search_description(self, substring, case_sensitive=False):
+    def search_description(self, *substrings, case_sensitive=False, mode='and'):
+        """
+        Looks for substrings
+        """
+        assert mode in ['and', 'or']
         descriptions = self.description
-        if not case_sensitive:
-            descriptions = np.char.lower(descriptions)
-            substring = substring.lower()
-        return np.char.find(descriptions, substring) >= 0
+        if not case_sensitive: descriptions = np.char.lower(descriptions)
+        mask = np.ones_like(self, dtype=bool) if mode == 'and' else np.zeros_like(self, dtype=bool)
+        for substring in substrings:
+            if not case_sensitive: substring = substring.lower()
+            mask_this_substring = np.char.find(descriptions, substring) >= 0
+            if mode == 'and':
+                mask &= mask_this_substring
+            elif mode == 'or':
+                mask |= mask_this_substring
+        return mask
 
 
 # Plug standard numpy array manipulations in scope
@@ -216,12 +308,17 @@ def stitch(ta1: TransactionArray, ta2: TransactionArray):
 
 def merge(tas):
     """
-    Merge transaction arrays; filters out duplicates
+    Merge transaction arrays; filters out duplicates BETWEEN arrays, but not INSIDE arrays
     """
-    ta, counts = np.unique(np.concatenate(tas), return_counts=True)
-    pprint.pprint(counts)
-    # logger.warning('Filtered {}')
-    return ta.view(TransactionArray)
+    base_ta = tas[0]
+    for i, ta in enumerate(tas[1:]):
+        duplicates = np.isin(ta, base_ta)
+        if logger.level >= logging.INFO and duplicates.sum()>0:
+            logger.info(
+                f'Found {duplicates.sum()} duplicate transactions when adding ta {i+1}:\n{ta[duplicates]}'
+                )
+        base_ta = np.concatenate((base_ta, ta[~duplicates]))
+    return base_ta.view(TransactionArray)
 
 
 # ________________________________________________________________
@@ -248,6 +345,7 @@ class Node:
         return self.name == other.name and self.integer == other.integer
 
     def add_child(self, other: Node):
+        if other.parent: other.parent.children.remove(other)
         other.parent = self
         self.children.append(other)
 
@@ -288,65 +386,150 @@ class Categorization:
       a transaction to a category (which is simply an integer)
     - A tree of Node's which provide the hierarchy of categories
     """
-    def __init__(self, ta: TransactionArray, category: np.ndarray = None, root: Node = None):
+    def __init__(self, ta: TransactionArray, category: np.ndarray = None, root: Node = None, sort: bool=True):
         self.ta = ta
         self.category = np.zeros(self.ta.shape[0], dtype=np.int16) if category is None else category
-        self.root = Node('root', 0) if root is None else root
+        if sort: self.resort()
+        if root is None:
+            self.root = Node('root', 0)
+            self._i_max_category = 0
+        else:
+            self.root = root
+            self._i_max_category = max(n.integer for n in iter_dfs(root))
 
-        # Internal bookkeeping; mainly dicts for fast lookups
-        self._map_int_to_cat = {0: self.root}
-        self._map_name_to_cat = {'root': self.root}
-        self._map_name_to_int = {'root': 0}
-
-        self._i_max_category = 0
+    def resort(self):
+        order = np.argsort(self.ta)
+        self.ta = self.ta[order]
+        self.category = self.category[order]
 
     def new_cat(self, name, parent=None):
         if parent is None: parent = self.root
         self._i_max_category += 1
         cat = Node(name, self._i_max_category)
         cat.set_parent(parent)
-        self._map_int_to_cat[cat.integer] = cat
-        self._map_name_to_cat[cat.name] = cat
-        self._map_name_to_int[cat.name] = cat.integer
         logger.info(
             f'Created new category "{cat.name}" with integer'
             f' {cat.integer} and parent "{parent.name}"'
             )
         return cat
 
-    def select(self, name: Union[str, Node]):
-        if isinstance(name, Node):
-            integer = name.integer
-        else:
-            integer = self._map_name_to_int[name]
-        return self.category == integer
+    def select(self, node: Node):
+        return Selection(self, self.category == node.integer, node)
 
-    def select_multiple(self, names: List[str]):
-        integers = [self._map_name_to_int[name] for name in names]
-        return np.isin(self.category, integers)
+    def select_multiple(self, nodes: List[Node]):
+        return Selection(self, np.isin(self.category, [n.integer for n in nodes]))
 
-    def select_recursively(self, name: str):
-        root = self._map_name_to_cat[name]
-        integers = [node.integer for node in iter_dfs(root)]
-        return np.isin(self.category, integers)
+    def select_recursively(self, node: Node):
+        return Selection(self, np.isin(self.category, [n.integer for n in iter_dfs(node)]))
 
     def add_transactions(self, ta):
         n_old = len(self.ta)
         self.ta = merge((self.ta, ta))
         n_added = len(self.ta) - n_old
         self.category = np.concatenate((self.category, np.zeros(n_added, dtype=int)))
+        self.resort()
+
+    def delete_node(self, node: Node):
+        # Put any transaction in node or its children in root
+        self.select_recursively(node) >> self.root
+        if node.parent:
+            node.parent.children.remove(node)
+        for n in list(iter_dfs(node)):
+            del n
+
+
+def iter_monthyears(min_monthyear, max_monthyear):
+    month = min_monthyear.imonth
+    year = min_monthyear.year
+    while not(year==max_monthyear.year and month==max_monthyear.imonth):
+        yield Monthyear(year, month)
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+
+month_str = {
+    1:'jan', 2:'feb', 3:'mar', 4:'apr', 5:'may', 6:'jun',
+    7:'jul', 8:'aug', 9:'sep', 10:'oct', 11:'nov', 12:'dec'
+    }
+month_integer = {v:k for k, v in month_str.items()}
+
+@dataclass
+class Monthyear:
+    year: int
+    imonth: int
+
+    @classmethod
+    def from_date(cls, date: Date):
+        return cls(date.year, date.month)
+
+    @classmethod
+    def from_str(cls, monthyear: str):
+        year = int(monthyear[3:])
+        if year < 100: year += 2000
+        imonth = month_integer[monthyear[:3].lower()]
+        return cls(year, imonth)
+
+    @property
+    def month(self):
+        return month_str[self.imonth]
+
+    @property
+    def monthyear(self):
+        return month_str[self.imonth] + str(self.year)
+
+    @property
+    def date(self):
+        return Date(self.year, self.imonth, 1)
+
+
+def month_table(categorization, root=None, min_monthyear=None, max_monthyear=None, exclude=None):
+    if root is None: root = categorization.root
+    if min_monthyear is None or max_monthyear is None:
+        dates = categorization.select_recursively(root).ta.date.astype(object)
+        if min_monthyear is None: min_monthyear = Monthyear.from_date(min(dates))
+        if max_monthyear is None: max_monthyear = Monthyear.from_date(max(dates))
+
+    monthyears = list(iter_monthyears(min_monthyear, max_monthyear))
+
+    row_labels = []
+    col_labels = [ m.monthyear for m in monthyears]
+    table = []
+    # Potentially add root itself if it has transactions
+    ta = categorization.select(root).ta
+    if len(ta):
+        row_labels.append('.')
+        row = []
+        for m in monthyears:
+            row.append(ta[(ta.year==m.year) & (ta.imonth==m.imonth)])
+        table.append(row)
+    for child in root.children:
+        if exclude and child.name in exclude: continue
+        row_labels.append(child.name)
+        ta = categorization.select_recursively(child).ta
+        row = []
+        for m in monthyears:
+            row.append(ta[(ta.year==m.year) & (ta.imonth==m.imonth)])
+        table.append(row)
+    return tables.Table(table, row_labels, col_labels)
 
 
 class Session:
     """
     Provides the linux-like interface to a Categorization instance
     """
-    def __init__(self, categorization):
+    def __init__(self, categorization: Categorization):
         self.categorization = categorization
         self.curr_dir = categorization.root
         self._filename = None
 
-    def get_dir(self, path):
+
+    @property
+    def gta(self):
+        return self.categorization.ta
+
+
+    def get_dir(self, path) -> Node:
         base_dir = self.curr_dir
         # First get rid of any needless '.' and '..'
         path = osp.normpath(path)
@@ -389,6 +572,17 @@ class Session:
 
     def cd(self, path: str):
         self.curr_dir = self.get_dir(path)
+        self.update_console_vars()
+
+
+    @property
+    def current_ta(self):
+        return self.categorization.ta[self.categorization.category == self.curr_dir.integer]
+
+
+    @property
+    def currdir_selection(self):
+        return self.categorization.select(self.curr_dir)
 
 
     def exists(self, path):
@@ -403,15 +597,30 @@ class Session:
         return self.exists(path)
 
 
-    def rm(self, path: str):
-        # TODO: What to do with transactions?
-        node = self.get_dir(path)
-        if node.parent:
-            node.parent.children.remove(node)
-        del node
+    def rm(self, path: Union[str, Node]):
+        node = path if isinstance(path, Node) else self.get_dir(path)
+        self.categorization.delete_node(node)
 
 
-    def mkdir(self, path: str):
+    def mv(self, src: str, dst: str):
+        """
+        Renames a path (potentially giving it a new parent).
+        Raises an exception if dst exists.
+        """
+        if self.exists(dst):
+            raise Exception(f'Cannot mv {src} -> {dst}; {dst} exists')
+        src_node = self.get_dir(src)
+        dst_node = self.mkdir(dst)
+        # Move transactions
+        self.categorization.select(src_node) >> dst_node
+        # Move children
+        for c in src_node.children.copy():
+            dst_node.add_child(c)
+        assert len(src_node.children) == 0
+        self.categorization.delete_node(src_node)
+
+
+    def mkdir(self, path: str) -> Node:
         base_dir = self.curr_dir
         path = osp.normpath(path)
         while path.startswith('..'):
@@ -431,12 +640,17 @@ class Session:
         return base_dir
 
 
-    def _reset_convenience_variables(self):
+    def update_console_vars(self):
         if hasattr(self, '_console_scope'):
-            ta = self.categorization.ta[self.categorization.category == self.curr_dir.integer]
+            ta = self.current_ta
             self._console_scope['ta'] = ta
             self._console_scope['date'] = ta.date
+            self._console_scope['day'] = ta.day
+            self._console_scope['month'] = ta.month
+            self._console_scope['year'] = ta.year
+            self._console_scope['monthyear'] = ta.monthyear
             self._console_scope['amount'] = ta.amount
+            self._console_scope['account'] = ta.account
             self._console_scope['description'] = ta.description
 
 
@@ -464,6 +678,9 @@ class Selection:
             r += f' (category: {self.category.name})'
         return r
 
+    def __invert__(self):
+        return Selection(self.categorization, (~self.selection))
+
     @property
     def ta(self):
         return self.categorization.ta[self.selection]
@@ -472,13 +689,18 @@ class Selection:
     def amount(self):
         return self.ta.amount
 
-    def __rshift__(self, other):
+    def __rshift__(self, other: Union[int, Selection, Node]):
         if isinstance(other, Selection):
             if other.category is None:
                 raise ValueError('Can only categorize into a specific category!')
-            self.categorization.category[self.selection] = other.category.integer
-            return
-        raise TypeError(f'Operation on type {type(other)} is undefined')
+            integer = other.category.integer
+        elif isinstance(other, Node):
+            integer = other.integer
+        elif isinstance(other, int):
+            integer = other
+        else:
+            raise TypeError(f'Operation on type {type(other)} is undefined')
+        self.categorization.category[self.selection] = integer
 
 
     def __and__(self, other):
@@ -529,11 +751,14 @@ def yield_code_blocks(expression: str):
 
 
 def format_code_block(block):
+    block = re.sub(r'\$\$([\w\.\/]*)', r'selectcategoryrecursively("\g<1>")', block)
     block = re.sub(r'\$([\w\.\/]*)', r'selectcategory("\g<1>")', block)
     # posix-like commands
     block = re.sub(r'\bpwd\b', r'printworkdir()', block)
     # ls/tree/cd command: If there is a word behind it, use it as argument, but also
     # allow argumentless
+    block = re.sub(r'\brm\s+([\w\./]+)(\s|$|;)', r'removecategory("\g<1>")\g<2>', block)
+    block = re.sub(r'\brm(\s|$)', r'removecategory()', block)
     block = re.sub(r'\bcd\s+([\w\./]+)(\s|$|;)', r'changedir("\g<1>")\g<2>', block)
     block = re.sub(r'\bcd(\s|$)', r'changedir()', block)
     block = re.sub(r'\bls\s+([\w\./]+)(\s|$|;)', r'listdir("\g<1>")\g<2>', block)
@@ -542,6 +767,10 @@ def format_code_block(block):
     block = re.sub(r'\btree(\s|$)', r'listtree()', block)
     block = re.sub(r'\bsave\s+([\w\./]+)(\s|$|;)', r'savecategorization("\g<1>")\g<2>', block)
     block = re.sub(r'\bsave(\s|$)', r'savecategorization()', block)
+    block = re.sub(r'\bmkdir\s+([\w\./]+)(\s|$|;)', r'makecategory("\g<1>")\g<2>', block)
+    block = re.sub(r'\bmkdir(\s|$)', r'makecategory()', block)
+    # Two argument functions
+    block = re.sub(r'\bmv\s+([\w\./]+)\s+([\w\./]+)(\s|$|;)', r'renamecategory("\g<1>","\g<2>")', block)
     return block
 
 
@@ -557,8 +786,21 @@ def make_eval_scope(session: Session):
     Instantiates all the functions and variables that are promised to be
     available in the console.
     """
+    # Insert all directory names in the scope for autocompletion
+    all_node_names = [n.name for n in iter_dfs(session.categorization.root)]
 
-    def selectcategory(name):
+    def makecategory(name):
+        node = session.mkdir(name)
+        all_node_names.append(node.name)
+
+    def renamecategory(src, dst):
+        session.mv(src, dst)
+
+    def removecategory(name):
+        if verify(f'Remove {name}? [y/n] '):
+            session.rm(name)
+
+    def selectcategory(name, recursive=False):
         extension = None
         if '.' in name and re.match(r'^[A-Za-z0-9_]+$', name.rsplit('.',1)[1]):
             # There is an attribute directly following the $, which will need to be eval'd
@@ -569,25 +811,32 @@ def make_eval_scope(session: Session):
             name = '/'.join(path)
             # ($..).amount.sum()
         if name == 'a':
-            select = np.ones_like(session.categorization.category, dtype=bool)
-            selection = Selection(session.categorization, select)
+            selection = Selection(session.categorization, np.ones_like(session.categorization.category, dtype=bool))
         elif name == 'h':
-            select = session.categorization.category == session.curr_dir.integer
-            selection = Selection(session.categorization, select, session.curr_dir)
+            if recursive:
+                selection = session.categorization.select_recursively(session.curr_dir)
+            else:
+                selection = session.categorization.select(session.curr_dir)
+        elif name == 'r':
+            selection = session.categorization.select_recursively(session.curr_dir)
         else:
             node = session.get_dir(name)
-            select = session.categorization.category==node.integer
-            selection = Selection(session.categorization, select, node)
+            if recursive:
+                selection = session.categorization.select_recursively(node)
+            else:
+                selection = session.categorization.select(node)
         ret = selection
         if extension:
             for method in extension.split('.'):
                 ret = getattr(ret, method)
         return ret
 
+    def selectcategoryrecursively(name):
+        return selectcategory(name, True)
+
     def changedir(name='/'):
         session.cd(name)
         set_ps1(session.abspath(session.curr_dir))
-        session._reset_convenience_variables()
         return
 
     def printworkdir():
@@ -598,8 +847,7 @@ def make_eval_scope(session: Session):
         print(session.abspath(directory))
         for child in directory.children:
             print('  '+child.name)
-        ta = session.categorization.ta[session.categorization.select(directory)]
-        print(ta)
+        print(session.categorization.select(directory).ta)
 
     def listtree(name=None):
         directory = session.curr_dir if name is None else session.get_dir(name)
@@ -615,27 +863,45 @@ def make_eval_scope(session: Session):
                 print('Cannot save: Pass a filename')
                 return
             filename = session._filename
-        if osp.isfile(filename):
-            while True:
-                answer = input(f'Overwrite {filename} [y/n]? ').lower()
-                if answer == 'y':
-                    break
-                elif answer == 'n':
-                    return
+        if osp.isfile(filename) and not verify(f'Overwrite {filename} [y/n]? '):
+            return
         with open(filename, 'w') as f:
             serialization.dump(session.categorization, f)
             print(f'Saved to {filename}')
             session._filename = filename
 
+    def search(*substrings, **kw):
+        return session.currdir_selection[session.current_ta.search_description(*substrings, **kw)]
+
+    def gsearch(*substrings, **kw):
+        return Selection(
+            session.categorization,
+            session.gta.search_description(*substrings, **kw)
+            )
+
+    def table(name=None, begin=None, end=None, exclude=None):
+        directory = session.curr_dir if name is None else session.get_dir(name)
+        if begin is not None: begin = Monthyear.from_str(begin)
+        if end is not None: end = Monthyear.from_str(end)
+        print(
+            month_table(
+                session.categorization, directory,
+                min_monthyear=begin, max_monthyear=end, exclude=exclude
+                ).str()
+            )
+
     # Convenience variables
-    gta = session.categorization.ta
+    s = search
+    gta = session.gta
     gdate = gta.date
     gamount = gta.amount
     gdescription = gta.description
-    ta = session.categorization.ta[session.categorization.category == session.curr_dir.integer]
-    date = ta.date
-    amount = ta.amount
-    description = ta.description
+    gday = gta.day
+    gmonth = gta.month
+    gyear = gta.year
+    gmonthyear = gta.monthyear
+    gaccount = gta.account
+
     bk = sys.modules[__name__]
     return locals()
 
@@ -649,3 +915,4 @@ def evaluate(session, expression):
 from . import serialization
 from . import console
 from . import cli
+from . import tables

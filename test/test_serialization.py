@@ -12,7 +12,7 @@ def test_basic_dumps():
     ta = bk.TransactionArray([
         bk.Transaction(bk.Date(2021,1,1), 5., 'starbucks'),
         bk.Transaction(bk.Date(2021,1,1), 300., 'costco'),
-        bk.Transaction(bk.Date(2021,1,2), 45.23, 'some food'),
+        bk.Transaction(bk.Date(2021,1,2), 45.23, 'some food', 'unfcu'),
         ])
     t = ta[0]
     assert loads(dumps(t), currencies=[bk.currencies.USD]) == t
@@ -31,4 +31,6 @@ def test_basic_dumps():
 
     np.testing.assert_array_equal(categorization.ta, reconstr_categorization.ta)
     np.testing.assert_array_equal(categorization.category, reconstr_categorization.category)
+    np.testing.assert_array_equal(categorization._i_max_category, reconstr_categorization._i_max_category)
+
     assert categorization.root == reconstr_categorization.root

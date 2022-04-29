@@ -21,8 +21,13 @@ def test_transaction_inequality():
     assert t1 == t2
     t2.amount = 7.
     assert t1 < t2
+    t2.amount = 6.
+    assert t1 == t2
     t2.date = Date(2021,1,1)
+    assert t2 != t1
     assert t2 < t1
+    t3 = Transaction(Date(2021,1,2), 6., 'starbucks', 'unfcu')
+    assert t1 != t2
 
 
 def test_array_slicing():
@@ -80,6 +85,25 @@ def test_selecting():
     np.testing.assert_equal(
         transactions[transactions.date > np.datetime64('2021-01-01')],
         TransactionArray([Transaction(Date(2021,1,2), 7., 'starbucks')])
+        )
+
+def test_search_description():
+    ta = TransactionArray([
+        Transaction(Date(2021,1,1), 5., 'starbucks'),
+        Transaction(Date(2021,1,1), 300., 'costco'),
+        Transaction(Date(2021,1,2), 7., 'starbucks koffie'),
+        ])
+    np.testing.assert_array_equal(
+        ta.search_description('starbucks'),
+        np.array([True, False, True])
+        )
+    np.testing.assert_array_equal(
+        ta.search_description('starbucks', 'koffie'),
+        np.array([False, False, True])
+        )
+    np.testing.assert_array_equal(
+        ta.search_description('starbucks', 'koffie', mode='or'),
+        np.array([True, False, True])
         )
 
 

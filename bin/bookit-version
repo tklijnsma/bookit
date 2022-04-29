@@ -1,2 +1,4 @@
-import bookit
-print(bookit.__version__)
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import bookit as bk
+bk.cli.version()
