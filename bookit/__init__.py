@@ -685,6 +685,9 @@ class Selection:
     def ta(self):
         return self.categorization.ta[self.selection]
 
+    def __len__(self):
+        return len(self.ta)
+
     @property
     def amount(self):
         return self.ta.amount

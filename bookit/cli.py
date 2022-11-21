@@ -1,7 +1,5 @@
 import bookit as bk
-import argparse
-import os.path as osp
-import importlib.machinery
+import sys, os.path as osp, argparse, importlib
 import numpy as np
 
 
@@ -22,8 +20,8 @@ class Parser:
 
     def add_parser_argument(self):
         self.parser.add_argument(
-            '-p', '--parser', type=str,
-            help='Path to a (python) file that defines a function `def read(filename: str) -> TransactionArray`.'
+            '-p', '--parser', type=str, default='parsers.py',
+            help='Path to a (python) file that defines functions to parse a file to a TransactionArray object.'
             )
 
     def parse_args(self, *args, **kwargs):
@@ -31,22 +29,6 @@ class Parser:
         if args.no_verification: bk.set_verification(False)
         if args.verbose: bk.debug()
         return args
-
-
-def extract_read_function(code_file):
-    """
-    Extracts a `read(filename: str) -> TransactionArray` function from a source file.
-    See https://stackoverflow.com/questions/19009932/import-arbitrary-python-source-file-python-3-3
-    """
-    loader = importlib.machinery.SourceFileLoader('module_with_read', code_file)
-    mod = loader.load_module()
-    try:
-        return mod.read
-    except AttributeError:
-        raise Exception(
-            'Please define a function `def read(filename: str) -> TransactionArray:`'
-            ' in your parser module.'
-            )
 
 
 def version():
@@ -61,13 +43,14 @@ def console():
         '-t', '--test', action='store_true',
         help='Starts a session with some debug transactions'
         )
+    parser.add_argument('--bankname', type=str, help='Only needed if using --parser')
     args = parser.parse_args()
 
     if args.test and len(args.categoryfile) > 0:
         raise Exception('Do not pass filenames if using the flag --test.')
 
-    if args.parser:
-        read = extract_read_function(args.parser)
+    if args.bankname:
+        read_fn = load_parser(args.parser)
 
     if args.test:
         bk.logger.info('Loading test session')
@@ -83,7 +66,7 @@ def console():
         cat = None
         source_filename = None
         for filename in args.filenames:
-            obj = read(filename) if args.parser else bk.serialization.load_from_path(filename)
+            obj = read_fn(filename) if args.bankname else bk.serialization.load_from_path(filename)
             if isinstance(obj, bk.TransactionArray):
                 if cat is None:
                     cat = bk.Categorization(obj)
@@ -103,18 +86,34 @@ def console():
     bk.console.Console(session).interact(f'Bookit {bk.__version__} console', 'Bye!')
 
 
+def load_parser(filename, bankname):
+    sys.path.append(osp.dirname(osp.abspath(filename)))
+    parsers = importlib.import_module(filename.replace('.py',''))
+    sys.path.pop()
+    try:
+        read_fn = getattr(parsers, bankname)
+    except AttributeError:
+        bk.logger.error(
+            f'Could not find a function called `{bankname}` in {filename}.'
+            f'\nMake sure there is a function `def {bankname}(filename: str) -> bk.TransactionArray` in {filename}.'
+            )
+        raise
+    return read_fn
+
+
 def parse_transactions():
     parser = Parser()
+    parser.add_argument('bankname', type=str, help='Should match the parse function name in your parsers.py file.')
     parser.add_argument('filenames', type=str, nargs='+', help='Input data files to parse')
     parser.add_argument(
         '-o', '--output', type=str,
         help='Output file to write to. If not specified, parsed transactions are only printed.'
         )
-    parser.add_parser_argument()    
+    parser.add_parser_argument()
     args = parser.parse_args()
-
-    read = extract_read_function(args.parser)
-    tas = [ read(f) for f in args.filenames ]
+    
+    read_fn = load_parser(args.parser, args.bankname)
+    tas = [ read_fn(f) for f in args.filenames ]
     ta = bk.merge(tas)
 
     if args.output:
@@ -132,6 +131,7 @@ def add_transactions():
     parser = Parser()
     parser.add_parser_argument()
     parser.add_argument('cat', type=str)
+    parser.add_argument('bankname', type=str)
     parser.add_argument('tas', type=str, nargs='+')
     parser.add_argument('-o', '--output', type=str)
     args = parser.parse_args()
@@ -139,17 +139,9 @@ def add_transactions():
     with open(args.cat, 'rb') as f:
         cat = bk.serialization.load(f)
 
-    def read(ta_file):
-        if args.parser:
-            # Run args.ta through the parser first
-            read = extract_read_function(args.parser)
-            ta = read(ta_file)
-        else:
-            with open(ta_file, 'rb') as f:
-                ta = bk.serialization.load(f)
-        return ta
 
-    ta_in = bk.merge([read(f) for f in args.tas])
+    read_fn = load_parser(args.parser, args.bankname)
+    ta_in = bk.merge([ read_fn(f) for f in args.tas ])
 
     if isinstance(cat, bk.Categorization):
         cat.add_transactions(ta_in)
